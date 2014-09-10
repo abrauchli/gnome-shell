@@ -58,28 +58,67 @@ function _getEndOfDay(date) {
     return ret;
 }
 
-function _formatEventTime(event, clockFormat) {
+function _formatEventTime(event, clockFormat, begin, end) {
     let ret;
-    if (event.allDay) {
+    let allDay = (event.allDay || (event.date <= begin && event.end >= end));
+    if (allDay) {
         /* Translators: Shown in calendar event list for all day events
          * Keep it short, best if you can use less then 10 characters
          */
-        ret = C_("event list time", "All Day");
+        if (event.allDay) {
+            ret = C_("event list time", "All Day");
+        } else if (event.date >= begin && event.end > end) {
+            /* Translators: \u2026 is the ellipsis character */
+            ret = C_("event list time", "All Day\u2026");
+        } else if (event.date < begin && event.end <= end) {
+            /* Translators: \u2026 is the ellipsis character */
+            ret = C_("event list time", "\u2026All Day");
+        } else {
+            /* Translators: \u2026 is the ellipsis character */
+            ret = C_("event list time", "\u2026All Day\u2026");
+        }
+
     } else {
         switch (clockFormat) {
         case '24h':
-            /* Translators: Shown in calendar event list, if 24h format,
-               \u2236 is a ratio character, similar to : */
-            ret = event.date.toLocaleFormat(C_("event list time", "%H\u2236%M"));
+            if (event.date < begin) {
+                /* Translators: Shown in calendar event list, if 24h format,
+                   \u2026 is the ellipsis character and
+                   \u2236 is a ratio character, similar to : */
+                ret = event.end.toLocaleFormat(C_("event list time", "\u2026%H\u2236%M"));
+            } else if (event.end > end) {
+                /* Translators: Shown in calendar event list, if 24h format,
+                   \u2236 is a ratio character, similar to : and
+                   \u2026 is the ellipsis character */
+                ret = event.date.toLocaleFormat(C_("event list time", "%H\u2236%M\u2026"));
+            } else {
+                /* Translators: Shown in calendar event list, if 24h format,
+                   \u2236 is a ratio character, similar to : */
+                ret = event.date.toLocaleFormat(C_("event list time", "%H\u2236%M"));
+            }
             break;
 
         default:
             /* explicit fall-through */
         case '12h':
-            /* Translators: Shown in calendar event list, if 12h format,
-               \u2236 is a ratio character, similar to : and \u2009 is
-               a thin space */
-            ret = event.date.toLocaleFormat(C_("event list time", "%l\u2236%M\u2009%p"));
+            if (event.date < begin) {
+                /* Translators: Shown in calendar event list, if 12h format,
+                   \u2026 is the ellipsis character,
+                   \u2236 is a ratio character, similar to : and
+                   \u2009 is a thin space */
+                ret = event.end.toLocaleFormat(C_("event list time", "\u2026%l\u2236%M\u2009%p"));
+            } else if (event.end > end) {
+                /* Translators: Shown in calendar event list, if 12h format,
+                   \u2236 is a ratio character, similar to :
+                   \u2009 is a thin space and
+                   \u2026 is the ellipsis character */
+                ret = event.date.toLocaleFormat(C_("event list time", "%l\u2236%M\u2009%p\u2026"));
+            } else {
+                /* Translators: Shown in calendar event list, if 12h format,
+                   \u2236 is a ratio character, similar to : and \u2009 is
+                   a thin space */
+                ret = event.date.toLocaleFormat(C_("event list time", "%l\u2236%M\u2009%p"));
+            }
             break;
         }
     }
@@ -361,6 +400,12 @@ const DBusEventSource = new Lang.Class({
                 result.push(event);
             }
         }
+        result.sort(function(event1, event2) {
+            // sort events by end time on ending day
+            let d1 = event1.date < begin && event1.end <= end ? event1.end : event1.date;
+            let d2 = event2.date < begin && event2.end <= end ? event2.end : event2.date;
+            return d1.getTime() - d2.getTime();
+        });
         return result;
     },
 
@@ -721,11 +766,14 @@ const EventsList = new Lang.Class({
         this._eventSource.connect('changed', Lang.bind(this, this._update));
     },
 
-    _addEvent: function(event, index, includeDayName) {
+    _addEvent: function(event, index, includeDayName, begin, end) {
         let dayString;
-        if (includeDayName)
-            dayString = _getEventDayAbbreviation(event.date.getDay());
-        else
+        if (includeDayName) {
+            if (event.date >= begin)
+                dayString = _getEventDayAbbreviation(event.date.getDay());
+            else /* show event end day if it began earlier */
+                dayString = _getEventDayAbbreviation(event.end.getDay());
+        } else
             dayString = '';
 
         let dayLabel = new St.Label({ style_class: 'events-day-dayname',
@@ -741,7 +789,7 @@ const EventsList = new Lang.Class({
         layout.attach(dayLabel, rtl ? 2 : 0, index, 1, 1);
 
         let clockFormat = this._desktopSettings.get_string(CLOCK_FORMAT_KEY);
-        let timeString = _formatEventTime(event, clockFormat);
+        let timeString = _formatEventTime(event, clockFormat, begin, end);
         let timeLabel = new St.Label({ style_class: 'events-day-time',
                                        text: timeString,
                                        y_align: Clutter.ActorAlign.START });
@@ -771,7 +819,7 @@ const EventsList = new Lang.Class({
         index++;
 
         for (let n = 0; n < events.length; n++) {
-            this._addEvent(events[n], index, includeDayName);
+            this._addEvent(events[n], index, includeDayName, begin, end);
             index++;
         }
 
@@ -779,7 +827,7 @@ const EventsList = new Lang.Class({
             let now = new Date();
             /* Translators: Text to show if there are no events */
             let nothingEvent = new CalendarEvent(now, now, _("Nothing Scheduled"), true);
-            this._addEvent(nothingEvent, index, false);
+            this._addEvent(nothingEvent, index, false, begin, end);
             index++;
         }
 
