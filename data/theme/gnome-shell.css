@@ -1447,7 +1447,6 @@ StScrollBar StButton#vhandle:active {
 
 .events-table {
     width: 320px;
-    spacing-columns: 6pt;
     padding: 0 1.4em;
 }
 
