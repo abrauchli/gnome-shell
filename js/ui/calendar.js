@@ -80,11 +80,12 @@ function _formatEventTime(event, clockFormat, begin, end) {
         ret = C_("event list time", "All Day");
 
     } else {
+        let date = event.date >= begin ? event.date : event.end;
         switch (clockFormat) {
         case '24h':
             /* Translators: Shown in calendar event list, if 24h format,
                \u2236 is a ratio character, similar to : */
-            ret = event.date.toLocaleFormat(C_("event list time", "%H\u2236%M"));
+            ret = date.toLocaleFormat(C_("event list time", "%H\u2236%M"));
             break;
 
         default:
@@ -93,7 +94,7 @@ function _formatEventTime(event, clockFormat, begin, end) {
             /* Translators: Shown in calendar event list, if 12h format,
                \u2236 is a ratio character, similar to : and \u2009 is
                a thin space */
-            ret = event.date.toLocaleFormat(C_("event list time", "%l\u2236%M\u2009%p"));
+            ret = date.toLocaleFormat(C_("event list time", "%l\u2236%M\u2009%p"));
             break;
         }
     }
@@ -375,6 +376,12 @@ const DBusEventSource = new Lang.Class({
                 result.push(event);
             }
         }
+        result.sort(function(event1, event2) {
+            // sort events by end time on ending day
+            let d1 = event1.date < begin && event1.end <= end ? event1.end : event1.date;
+            let d2 = event2.date < begin && event2.end <= end ? event2.end : event2.date;
+            return d1.getTime() - d2.getTime();
+        });
         return result;
     },
 
@@ -735,11 +742,14 @@ const EventsList = new Lang.Class({
         this._eventSource.connect('changed', Lang.bind(this, this._update));
     },
 
-    _addEvent: function(event, index, includeDayName) {
+    _addEvent: function(event, index, includeDayName, begin, end) {
         let dayString;
-        if (includeDayName)
-            dayString = _getEventDayAbbreviation(event.date.getDay());
-        else
+        if (includeDayName) {
+            if (event.date >= begin)
+                dayString = _getEventDayAbbreviation(event.date.getDay());
+            else /* show event end day if it began earlier */
+                dayString = _getEventDayAbbreviation(event.end.getDay());
+        } else
             dayString = '';
 
         let dayLabel = new St.Label({ style_class: 'events-day-dayname',
@@ -800,14 +810,14 @@ const EventsList = new Lang.Class({
         index++;
 
         for (let n = 0; n < events.length; n++) {
-            this._addEvent(events[n], index, includeDayName);
+            this._addEvent(events[n], index, includeDayName, begin, end);
             index++;
         }
 
         if (events.length == 0 && showNothingScheduled) {
             /* Translators: Text to show if there are no events */
             let nothingEvent = new CalendarEvent(begin, begin, _("Nothing Scheduled"), true);
-            this._addEvent(nothingEvent, index, false);
+            this._addEvent(nothingEvent, index, false, begin, end);
             index++;
         }
 
