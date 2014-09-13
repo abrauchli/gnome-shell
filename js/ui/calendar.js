@@ -13,6 +13,7 @@ const Shell = imports.gi.Shell;
 
 const MSECS_IN_DAY = 24 * 60 * 60 * 1000;
 const SHOW_WEEKDATE_KEY = 'show-weekdate';
+const EventEllipses = { NONE: 0, BEFORE: 1, AFTER: 2, BOTH: 3 };
 
 // alias to prevent xgettext from picking up strings translated in GTK+
 const gtk30_ = Gettext_gtk30.gettext;
@@ -58,13 +59,26 @@ function _getEndOfDay(date) {
     return ret;
 }
 
-function _formatEventTime(event, clockFormat) {
+function _ellipsizeEventTime(event, begin, end) {
+    let ret = EventEllipses.NONE;
+    if (event.allDay)
+        return EventEllipses.NONE;
+    if (event.date < begin)
+        ret = EventEllipses.BEFORE;
+    if (event.end > end)
+        ret |= EventEllipses.AFTER;
+    return ret;
+}
+
+function _formatEventTime(event, clockFormat, begin, end) {
     let ret;
-    if (event.allDay) {
+    let allDay = (event.allDay || (event.date <= begin && event.end >= end));
+    if (allDay) {
         /* Translators: Shown in calendar event list for all day events
          * Keep it short, best if you can use less then 10 characters
          */
         ret = C_("event list time", "All Day");
+
     } else {
         switch (clockFormat) {
         case '24h':
@@ -738,17 +752,32 @@ const EventsList = new Lang.Class({
         let rtl = this.actor.get_text_direction() == Clutter.TextDirection.RTL;
 
         let layout = this.actor.layout_manager;
-        layout.attach(dayLabel, rtl ? 2 : 0, index, 1, 1);
+        layout.attach(dayLabel, rtl ? 4 : 0, index, 1, 1);
+
+        const ELLIPSIS_CHAR = '\u2026';
+        let ellipses = _ellipsizeEventTime(event, begin, end);
+        if (ellipses & EventEllipses.BEFORE) {
+            let elLabel = new St.Label({ style_class: 'events-day-time',
+                                         text: ELLIPSIS_CHAR,
+                                         y_align: Clutter.ActorAlign.START });
+            layout.attach(elLabel, rtl ? 3 : 1, index, 1, 1);
+        }
+        if (ellipses & EventEllipses.AFTER) {
+            let elLabel = new St.Label({ style_class: 'events-day-time',
+                                         text: ELLIPSIS_CHAR,
+                                         y_align: Clutter.ActorAlign.START });
+            layout.attach(elLabel, rtl ? 1 : 3, index, 1, 1);
+        }
 
         let clockFormat = this._desktopSettings.get_string(CLOCK_FORMAT_KEY);
-        let timeString = _formatEventTime(event, clockFormat);
+        let timeString = _formatEventTime(event, clockFormat, begin, end);
         let timeLabel = new St.Label({ style_class: 'events-day-time',
                                        text: timeString,
                                        y_align: Clutter.ActorAlign.START });
         timeLabel.clutter_text.line_wrap = false;
         timeLabel.clutter_text.ellipsize = false;
 
-        layout.attach(timeLabel, 1, index, 1, 1);
+        layout.attach(timeLabel, 2, index, 1, 1);
 
         let titleLabel = new St.Label({ style_class: 'events-day-task',
                                         text: event.summary,
@@ -756,7 +785,7 @@ const EventsList = new Lang.Class({
         titleLabel.clutter_text.line_wrap = true;
         titleLabel.clutter_text.ellipsize = false;
 
-        layout.attach(titleLabel, rtl ? 0 : 2, index, 1, 1);
+        layout.attach(titleLabel, rtl ? 0 : 4, index, 1, 1);
     },
 
     _addPeriod: function(header, index, begin, end, includeDayName, showNothingScheduled) {
@@ -767,7 +796,7 @@ const EventsList = new Lang.Class({
 
         let label = new St.Label({ style_class: 'events-day-header', text: header });
         let layout = this.actor.layout_manager;
-        layout.attach(label, 0, index, 3, 1);
+        layout.attach(label, 0, index, 5, 1);
         index++;
 
         for (let n = 0; n < events.length; n++) {
@@ -776,9 +805,8 @@ const EventsList = new Lang.Class({
         }
 
         if (events.length == 0 && showNothingScheduled) {
-            let now = new Date();
             /* Translators: Text to show if there are no events */
-            let nothingEvent = new CalendarEvent(now, now, _("Nothing Scheduled"), true);
+            let nothingEvent = new CalendarEvent(begin, begin, _("Nothing Scheduled"), true);
             this._addEvent(nothingEvent, index, false);
             index++;
         }
